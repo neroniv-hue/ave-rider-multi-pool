@@ -76,7 +76,6 @@ function processMultiAssetEngine(pool, nextPrice) {
 }
 
 function startMultiAssetSimulation() {
-    // Clear out old simulated execution pass logs to render clean current cycles
     globalLedgerLogs = [];
     
     const simulatedPrices = [
@@ -98,7 +97,6 @@ function startMultiAssetSimulation() {
     });
 }
 
-// 🗺️ HTML Template Generator built directly inside core thread
 function generateHtmlLayout() {
     startMultiAssetSimulation();
     
@@ -193,3 +191,7 @@ function generateHtmlLayout() {
                     </thead>
                     <tbody>
                         ${poolRowsHtml}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card">
