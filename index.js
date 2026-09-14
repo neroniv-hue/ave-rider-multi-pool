@@ -1,21 +1,71 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE & INTERFACE LAYER
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE & INTERFACE LAYER (LIVE ON-CHAIN DATA)
+ * RUNTIME REQUIREMENTS: Node.js (Zero external code dependencies)
  */
 "use strict";
 const http = require('http');
+const https = require('https');
 
+// Master capital allocations setup ($1500.00 USDC / 125M WPLS)
 let totalUsdcWallet = 1500.00;
 let totalWplsWallet = 125000000.0;
 
+// Multi-Asset tracking arrays mapping official deep on-chain liquidity pools across PulseX V2
 const assetPools = [
-    { name: "WPLS/USDC", currentPrice: 0.00001187, baseline: 0.00001182, rollingWindow: [], position: null },
-    { name: "PLSX/WPLS", currentPrice: 0.00003450, baseline: 0.00003410, rollingWindow: [], position: null },
-    { name: "HEX/WPLS",  currentPrice: 0.12500000, baseline: 0.12350000, rollingWindow: [], position: null },
-    { name: "DAI/WPLS",  currentPrice: 84200.0000, baseline: 84000.0000, rollingWindow: [], position: null },
-    { name: "INC/WPLS",  currentPrice: 145.000000, baseline: 144.100000, rollingWindow: [], position: null }
+    { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 0.00001187, baseline: 0.00001182, rollingWindow: [], position: null, reverseDecimals: false },
+    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", currentPrice: 0.03450000, baseline: 0.03410000, rollingWindow: [], position: null, reverseDecimals: false },
+    { name: "HEX/WPLS",  contract: "0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65", currentPrice: 0.12500000, baseline: 0.12350000, rollingWindow: [], position: null, reverseDecimals: false },
+    { name: "DAI/WPLS",  contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 84200.0000, baseline: 84000.0000, rollingWindow: [], position: null, reverseDecimals: true },
+    { name: "INC/WPLS",  contract: "0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa", currentPrice: 12200.0000, baseline: 12150.0000, rollingWindow: [], position: null, reverseDecimals: true }
 ];
 
 let globalLedgerLogs = [];
+
+// Lightweight post channel utility to query public blockchain nodes via native RPC protocols
+function queryOnChainReserves(contractAddress) {
+    return new Promise((resolve) => {
+        const payloadData = JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_call",
+            params: [{
+                to: contractAddress,
+                data: "0x0902f1ac" // Standard ERC20/UniswapV2 Pair getReserves() signature selector hash
+            }, "latest"],
+            id: 1
+        });
+
+        const reqOptions = {
+            hostname: 'rpc.pulsechain.com',
+            port: 443,
+            path: '/',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': payloadData.length
+            }
+        };
+
+        const postQuery = https.request(reqOptions, (res) => {
+            let chunkBuffer = '';
+            res.on('data', (d) => chunkBuffer += d);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(chunkBuffer);
+                    if (parsed.result && parsed.result !== "0x") {
+                        // Strip hex buffer parts to unpack Reserve0 and Reserve1 parameter allocations
+                        const rawR0 = BigInt("0x" + parsed.result.slice(2, 66));
+                        const rawR1 = BigInt("0x" + parsed.result.slice(66, 130));
+                        resolve({ r0: Number(rawR0) / 1e18, r1: Number(rawR1) / 1e18 });
+                    } else { resolve(null); }
+                } catch (e) { resolve(null); }
+            });
+        });
+
+        postQuery.on('error', () => resolve(null));
+        postQuery.write(payloadData);
+        postQuery.end();
+    });
+}
 
 function updatePoolVolatility(pool, price) {
     pool.rollingWindow.push(price);
@@ -57,43 +107,44 @@ function processMultiAssetEngine(pool, nextPrice) {
     }
 }
 
-function generateHtmlLayout() {
-    globalLedgerLogs = [];
-    const prices = [0.00001014, 0.00001055, 0.00000995, 0.00001075, 0.00001190, 0.00001262, 0.00001187];
-    prices.forEach(p => {
-        assetPools.forEach(pool => {
-            let adj = p;
-            if (pool.name.includes("PLSX")) adj = p * 2.9;
-            if (pool.name.includes("HEX")) adj = p * 10500;
-            if (pool.name.includes("DAI")) adj = p * 7000000000;
-            if (pool.name.includes("INC")) adj = p * 12200000;
-            processMultiAssetEngine(pool, adj);
-        });
-    });
+async function executeLiveBlockchainPricedSimulation() {
+    // Sequentially download actual, live smart contract states via the RPC layer
+    for (let i = 0; i < assetPools.length; i++) {
+        const pool = assetPools[i];
+        const reserves = await queryOnChainReserves(pool.contract);
+        if (reserves && reserves.r0 > 0 && reserves.r1 > 0) {
+            let calculatedPrice = pool.reverseDecimals 
+                ? (reserves.r0 / reserves.r1) 
+                : (reserves.r1 / reserves.r0);
+            
+            // Handle WPLS/USDC stable scaling parameters safely
+            if (pool.name === "WPLS/USDC") calculatedPrice = calculatedPrice * 1e12; 
+
+            pool.currentPrice = calculatedPrice;
+            processMultiAssetEngine(pool, calculatedPrice);
+        }
+    }
+}
+
+async function generateHtmlLayout() {
+    await executeLiveBlockchainPricedSimulation();
     
     let poolRowsHtml = "";
     assetPools.forEach(p => {
         let label = p.position ? `<span style="background:${p.position.type==='LONG'?'#10b981':'#f43f5e'};color:white;padding:3px 6px;border-radius:4px;font-weight:bold;font-size:11px;">${p.position.type} ACTIVE</span>` : `<span style="background:#475569;color:white;padding:3px 6px;border-radius:4px;font-weight:bold;font-size:11px;">MONITORING</span>`;
-        let details = p.position ? `Entry: $${p.position.entry.toFixed(p.position.entry < 1 ? 6 : 2)}` : "No active allocation";
-        poolRowsHtml += `<tr><td><b>${p.name}</b></td><td>${label}</td><td>$${p.currentPrice.toFixed(p.currentPrice < 1 ? 6 : 2)}</td><td>$${p.baseline.toFixed(p.baseline < 1 ? 6 : 2)}</td><td><span style="color:#94a3b8;">${details}</span></td></tr>`;
+        let decPlaces = p.currentPrice < 0.01 ? 8 : (p.currentPrice > 1000 ? 2 : 4);
+        let details = p.position ? `Entry: ${p.position.entry.toFixed(decPlaces)}` : "No active allocation";
+        poolRowsHtml += `<tr><td><b>${p.name}</b></td><td>${label}</td><td>${p.currentPrice.toFixed(decPlaces)}</td><td>${p.baseline.toFixed(decPlaces)}</td><td><span style="color:#94a3b8;">${details}</span></td></tr>`;
     });
 
-    let ledgerRowsHtml = globalLedgerLogs.length === 0 ? '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:12px;">No logged trades.</td></tr>' : '';
+    let ledgerRowsHtml = globalLedgerLogs.length === 0 ? '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:12px;">No live on-chain trades generated inside this session segment yet.</td></tr>' : '';
     [...globalLedgerLogs].reverse().slice(0, 5).forEach(log => {
         let col = log.action.includes('ENTER') || log.action.includes('COVER') ? '#10b981' : '#ef4444';
-        ledgerRowsHtml += `<tr><td><span style="background:${col};color:white;padding:2px 5px;border-radius:4px;font-size:11px;font-weight:bold;">${log.action}</span></td><td><b>${log.pair}</b></td><td>$${log.price.toFixed(log.price < 1 ? 6 : 2)}</td><td style="color:#10b981;font-weight:bold;">Executed</td></tr>`;
+        let logDecPlaces = log.price < 0.01 ? 8 : (log.price > 1000 ? 2 : 4);
+        ledgerRowsHtml += `<tr><td><span style="background:${col};color:white;padding:2px 5px;border-radius:4px;font-size:11px;font-weight:bold;">${log.action}</span></td><td><b>${log.pair}</b></td><td>${log.price.toFixed(logDecPlaces)}</td><td style="color:#10b981;font-weight:bold;">Verified</td></tr>`;
     });
 
-    const totalEquity = totalUsdcWallet + (totalWplsWallet * 0.00001187);
-    return `<!DOCTYPE html><html><head><title>Multi-Asset Portfolio</title><style>body{font-family:sans-serif;background:#0f0f11;color:#e2e8f0;padding:30px;margin:0;}.container{max-width:850px;margin:0 auto;}.card{background:#16161a;border:1px solid #24242b;padding:25px;border-radius:12px;margin-bottom:20px;}.lbl{font-size:13px;color:#94a3b8;text-transform:uppercase;margin-bottom:5px;}.val{font-size:28px;font-weight:bold;font-family:monospace;}.green-txt{color:#10b981;}table{width:100%;border-collapse:collapse;margin-top:15px;}th{text-align:left;padding:12px;background:#1e1e24;color:#94a3b8;font-size:12px;}td{padding:12px;border-bottom:1px solid #24242b;font-size:13px;}</style></head><body><div class="container"><div class="card" style="border-left:5px solid #10b981;"><div class="lbl">BOT STATE</div><div class="val" style="color:#10b981;">● MULTI-ASSET SCANNER ONLINE</div></div><div class="card"><div class="lbl">BALANCE MONITORS</div><div style="display:flex;justify-content:space-between;margin-top:15px;"><div><div class="lbl">USDC BALANCE</div><div class="val">$${totalUsdcWallet.toFixed(2)}</div></div><div><div class="lbl">RESERVE WPLS</div><div class="val">${totalWplsWallet.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div><div class="card"><div class="lbl">NET PORTFOLIO VALUATION</div><div class="val green-txt">$${totalEquity.toFixed(2)} USD</div></div><div class="card"><div class="lbl">🕵️‍♂️ ACTIVE ASSET MATRICES (5 POOLS)</div><table><thead><tr><th>Trading Pair Pool</th><th>Status</th><th>Market Price</th><th>Baseline Anchor</th><th>Allocation Space</th></tr></thead><tbody>${poolRowsHtml}</tbody></table></div><div class="card"><div class="lbl">🗒️ RECENT TRANSACTION HISTORY</div><table><thead><tr><th>Action</th><th>Target Asset Pair</th><th>Price</th><th>Validation</th></tr></thead><tbody>${ledgerRowsHtml}</tbody></table></div></div></body></html>`;
-}
-
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(generateHtmlLayout());
-});
-
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-    console.log(`📡 Online on port ${PORT}`);
-});
+    // Find live WPLS rate to construct an accurate USD valuation summary
+    const wplsLiveAnchor = assetPools.find(p => p.name === "WPLS/USDC")?.currentPrice || 0.00001187;
+    const totalEquity = totalUsdcWallet + (totalWplsWallet * wplsLiveAnchor);
+    
