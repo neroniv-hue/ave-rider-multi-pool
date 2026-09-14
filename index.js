@@ -1,8 +1,8 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE
- * RUNTIME REQUIREMENTS: Node.js (Zero external code dependencies)
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (FREE WEB COMPATIBLE)
  */
 "use strict";
+const http = require('http');
 
 let totalUsdcWallet = 1500.00;
 let totalWplsWallet = 125000000.0;
@@ -96,17 +96,29 @@ function startMultiAssetSimulation() {
     const finalWplsValuation = totalWplsWallet * 0.00001187;
     const finalCombinedNetWorth = totalUsdcWallet + finalWplsValuation;
 
-    console.log("\n==================================================");
-    console.log("📊 MULTI-ASSET PORTFOLIO RISK SUMMARY");
-    console.log("==================================================");
-    console.log(`• Total 1-Minute Multi-Pool Ticks Simmed: 43,200`);
-    console.log(`• Combined Algorithmic System Trades Fired: ${globalLedgerLogs.length}`);
-    console.log(`• Final Portfolio Liquid Cash Balance:     $${totalUsdcWallet.toFixed(2)} USDC`);
-    console.log(`• Final Portfolio Reserve WPLS Balance:    ${totalWplsWallet.toLocaleString(undefined, {maximumFractionDigits:2})} WPLS`);
-    console.log(`• CONSOLIDATED ACCOUNT VALUE NET EQUITY:   $${finalCombinedNetWorth.toFixed(2)} USD`);
-    console.log("==================================================\n");
+    const report = `
+==================================================
+📊 MULTI-ASSET PORTFOLIO RISK SUMMARY
+==================================================
+• Combined Algorithmic System Trades Fired: ${globalLedgerLogs.length}
+• Final Portfolio Liquid Cash Balance:     $${totalUsdcWallet.toFixed(2)} USDC
+• Final Portfolio Reserve WPLS Balance:    ${totalWplsWallet.toLocaleString()} WPLS
+• CONSOLIDATED ACCOUNT VALUE NET EQUITY:   $${finalCombinedNetWorth.toFixed(2)} USD
+==================================================`;
+    
+    console.log(report);
+    return report;
 }
 
-// Keep background logging alive
-setInterval(startMultiAssetSimulation, 300000);
-startMultiAssetSimulation();
+// Create a basic web routing server to allow Render's free tier to link up cleanly
+const server = http.createServer((req, res) => {
+    const summary = startMultiAssetSimulation();
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(`Heartbeat accepted. Latest calculation summary status:\n${summary}`);
+});
+
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => {
+    console.log(`📡 Free multi-asset server router online on port ${PORT}`);
+    startMultiAssetSimulation();
+});
