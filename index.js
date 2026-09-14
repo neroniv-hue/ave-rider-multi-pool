@@ -1,17 +1,17 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (FIXED TOKEN CONTRACT LOCKED)
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (TRUE PULSEX V1 ROUTING LAYER)
  */
 "use strict";
 const http = require('http'), https = require('https');
 
 let totalUsdcWallet = 1500.00, totalWplsWallet = 125000000.0, globalLedgerLogs = [];
 const assetPools = [
-    { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", currentPrice: 0.00001214, baseline: 0.00001210, rollingWindow: [], position: null, dec0: 18, dec1: 6, mode: "WPLS_USDC" },
-    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", token: "0x95B303987A60C71504D99Aa1b13B4DA07b0790ab", currentPrice: 0.00001053, baseline: 0.00001040, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "PLSX_INVERTED" },
-    { name: "HEX/WPLS",  contract: "0x8c339396e97424683c6cdc56bf50d4fe37eaa", token: "0x2b591e99afE9f32eAA6214f7B7629768c40Eeb39", currentPrice: 0.00358500, baseline: 0.00355000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "HEX_INVERTED" },
-    // 🔒 LOCKED TARGET: This specific address slot is permanently anchored to your verified token block contract
-    { name: "pDAI/WPLS", contract: "0x11116671a69e5d0d7d221430f7c7333b3838e7e0", token: "0x6B175474E89094C44Da98b954EedeAC495271d0F", currentPrice: 0.00237100, baseline: 0.00235000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "RATIO_1_0" },
-    { name: "INC/WPLS",  contract: "0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa", token: "0x2fa878Ab3F87CC1C9737Fc071108F904c0B0C95d", currentPrice: 0.55160000, baseline: 0.55000000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "RATIO_1_0" }
+    // 🖥️ Unified PulseX V1 Liquidity Pair Contract Network Map
+    { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 0.00001237, baseline: 0.00001230, rollingWindow: [], position: null, dec0: 18, dec1: 6, order: "NORMAL" },
+    { name: "PLSX/WPLS", contract: "0x1b45227d812da07bc9fa090b830d9959e414c330", currentPrice: 0.00001077, baseline: 0.00001070, rollingWindow: [], position: null, dec0: 18, dec1: 18, order: "INVERTED" },
+    { name: "HEX/WPLS",  contract: "0x55d5c263742412e45cfb2229e009403d980f772e", currentPrice: 0.00370200, baseline: 0.00368000, rollingWindow: [], position: null, dec0: 18, dec1: 18, order: "INVERTED" },
+    { name: "pDAI/WPLS", contract: "0xbbc9e21dfd71c89369352e854fa16b0a82e9e623", currentPrice: 0.00237100, baseline: 0.00235000, rollingWindow: [], position: null, dec0: 18, dec1: 18, order: "NORMAL" },
+    { name: "INC/WPLS",  contract: "0x78ef5a8ee7a7a2fa5b77fb705886915b81a4dbe1", currentPrice: 0.56990000, baseline: 0.56500000, rollingWindow: [], position: null, dec0: 18, dec1: 18, order: "NORMAL" }
 ];
 
 function queryOnChainReserves(contractAddress, d0, d1) {
@@ -51,26 +51,25 @@ function processMultiAssetEngine(p, nextPrice) {
 }
 
 async function renderHtmlLayout() {
-    let wplsUsdPrice = 0.00001214;
+    let wplsUsdPrice = 0.00001237;
     const wplsReserves = await queryOnChainReserves("0xe56043671df55de5cdf8459710433c10324de0ae", 18, 6);
     if (wplsReserves && wplsReserves.r0 > 0) { wplsUsdPrice = wplsReserves.r1 / wplsReserves.r0; }
 
     for (let i = 0; i < assetPools.length; i++) {
         const pool = assetPools[i];
-        if (pool.mode === "WPLS_USDC") { pool.currentPrice = wplsUsdPrice; processMultiAssetEngine(pool, wplsUsdPrice); continue; }
+        if (pool.name === "WPLS/USDC") { pool.currentPrice = wplsUsdPrice; processMultiAssetEngine(pool, wplsUsdPrice); continue; }
         
         const reserves = await queryOnChainReserves(pool.contract, pool.dec0, pool.dec1);
         if (reserves && reserves.r0 > 0 && reserves.r1 > 0) {
-            let finalizedPrice = 0;
-            if (pool.mode === "PLSX_INVERTED") {
-                finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
-            } else if (pool.mode === "HEX_INVERTED") {
-                finalizedPrice = (reserves.r0 / reserves.r1) * wplsUsdPrice;
-            } else if (pool.mode === "RATIO_1_0") {
-                finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
-            }
-            pool.currentPrice = finalizedPrice;
-            processMultiAssetEngine(pool, finalizedPrice);
+            let tokenRatio = (pool.order === "INVERTED") ? (reserves.r1 / reserves.r0) : (reserves.r0 / reserves.r1);
+            let absoluteDollarWorth = tokenRatio * wplsUsdPrice;
+            
+            // Native cross-rate routing overrides for outlier V1 configurations
+            if (pool.name === "PLSX/WPLS") absoluteDollarWorth = (reserves.r0 / reserves.r1) * wplsUsdPrice;
+            if (pool.name === "INC/WPLS") absoluteDollarWorth = (reserves.r1 / reserves.r0) * wplsUsdPrice;
+
+            pool.currentPrice = absoluteDollarWorth; 
+            processMultiAssetEngine(pool, absoluteDollarWorth);
         }
     }
 
@@ -78,7 +77,7 @@ async function renderHtmlLayout() {
     let lRows = globalLedgerLogs.length === 0 ? '<tr><td colspan="4">No trades logged yet inside this sequence session.</td></tr>' : ''; [...globalLedgerLogs].reverse().slice(0, 5).forEach(l => { let dec = l.price < 0.01 ? 8 : 4; lRows += `<tr><td><b>${l.action}</b></td><td>${l.pair}</td><td>$${l.price.toFixed(dec)}</td><td>Verified</td></tr>`; });
     const totalEquity = totalUsdcWallet + (totalWplsWallet * wplsUsdPrice);
     
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="10"><title>Portfolio</title><style>body{font-family:sans-serif;background:#0f0f11;color:#e2e8f0;padding:30px;}.container{max-width:850px;margin:0 auto;}.card{background:#16161a;border:1px solid #24242b;padding:25px;border-radius:12px;margin-bottom:20px;}.lbl{font-size:13px;color:#94a3b8;text-transform:uppercase;}.val{font-size:28px;font-weight:bold;font-family:monospace;}.green-txt{color:#10b981;}table{width:100%;border-collapse:collapse;margin-top:15px;}th{text-align:left;padding:12px;background:#1e1e24;color:#94a3b8;font-size:12px;}td{padding:12px;border-bottom:1px solid #24242b;font-size:13px;}</style></head><body><div class="container"><div class="card" style="border-left:5px solid #10b981;"><div class="lbl">BOT GLOBAL STATE</div><div class="val" style="color:#10b981;">[ON-CHAIN] MULTI-ASSET RISK BALANCER LIVE (TOKEN ADDRESS LOCKED)</div></div><div class="card"><div class="lbl">CONSOLIDATED LIQUIDITY BALANCES</div><div style="display:flex;justify-content:space-between;margin-top:15px;"><div><div class="lbl">USDC BALANCE</div><div class="val">$${totalUsdcWallet.toFixed(2)}</div></div><div><div class="lbl">RESERVE WPLS</div><div class="val">${totalWplsWallet.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div><div class="card"><div class="lbl">REAL-TIME PORTFOLIO NET WORTH</div><div class="val green-txt">$${totalEquity.toFixed(2)} USD</div></div><div class="card"><div class="lbl">[MONITOR] LIVE ON-CHAIN PRICE MATRIX (FIAT USD VALUATIONS)</div><table><thead><tr><th>Trading Pair Pool</th><th>Status</th><th>On-Chain Market Rate</th><th>Baseline Anchor</th><th>Allocation Space</th></tr></thead><tbody>${pRows}</tbody></table></div><div class="card"><div class="lbl">[LOGS] LIVE BLOCK EXECUTION RECORD LAYER</div><table><thead><tr><th>Action</th><th>Target Asset Pair</th><th>Price Value</th><th>Network Validation</th></tr></thead><tbody>${lRows}</tbody></table></div></div></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="10"><title>Portfolio</title><style>body{font-family:sans-serif;background:#0f0f11;color:#e2e8f0;padding:30px;}.container{max-width:850px;margin:0 auto;}.card{background:#16161a;border:1px solid #24242b;padding:25px;border-radius:12px;margin-bottom:20px;}.lbl{font-size:13px;color:#94a3b8;text-transform:uppercase;}.val{font-size:28px;font-weight:bold;font-family:monospace;}.green-txt{color:#10b981;}table{width:100%;border-collapse:collapse;margin-top:15px;}th{text-align:left;padding:12px;background:#1e1e24;color:#94a3b8;font-size:12px;}td{padding:12px;border-bottom:1px solid #24242b;font-size:13px;}</style></head><body><div class="container"><div class="card" style="border-left:5px solid #10b981;"><div class="lbl">BOT GLOBAL STATE</div><div class="val" style="color:#10b981;">[ON-CHAIN] MULTI-ASSET RISK BALANCER LIVE (PULSEX V1 REALIGNMENT COMPLETE)</div></div><div class="card"><div class="lbl">CONSOLIDATED LIQUIDITY BALANCES</div><div style="display:flex;justify-content:space-between;margin-top:15px;"><div><div class="lbl">USDC BALANCE</div><div class="val">$${totalUsdcWallet.toFixed(2)}</div></div><div><div class="lbl">RESERVE WPLS</div><div class="val">${totalWplsWallet.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div><div class="card"><div class="lbl">REAL-TIME PORTFOLIO NET WORTH</div><div class="val green-txt">$${totalEquity.toFixed(2)} USD</div></div><div class="card"><div class="lbl">[MONITOR] LIVE ON-CHAIN PRICE MATRIX (FIAT USD VALUATIONS)</div><table><thead><tr><th>Trading Pair Pool</th><th>Status</th><th>On-Chain Market Rate</th><th>Baseline Anchor</th><th>Allocation Space</th></tr></thead><tbody>${pRows}</tbody></table></div><div class="card"><div class="lbl">[LOGS] LIVE BLOCK EXECUTION RECORD LAYER</div><table><thead><tr><th>Action</th><th>Target Asset Pair</th><th>Price Value</th><th>Network Validation</th></tr></thead><tbody>${lRows}</tbody></table></div></div></body></html>`;
 }
 
-http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 Locked Token Script Active"); });
+http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 V1 Full-Suite Router Active"); });
