@@ -1,5 +1,5 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (EXACT LIVE ON-CHAIN RATES)
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (DEFINITIVE ON-CHAIN FIX)
  */
 "use strict";
 const http = require('http'), https = require('https');
@@ -7,8 +7,8 @@ const http = require('http'), https = require('https');
 let totalUsdcWallet = 1500.00, totalWplsWallet = 125000000.0, globalLedgerLogs = [];
 const assetPools = [
     { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 0.00001214, baseline: 0.00001210, rollingWindow: [], position: null, dec0: 18, dec1: 6, mode: "WPLS_USDC" },
-    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", currentPrice: 0.00000041, baseline: 0.00000040, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "RATIO_0_1" },
-    { name: "HEX/WPLS",  contract: "0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65", currentPrice: 0.00358500, baseline: 0.00355000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "RATIO_0_1" },
+    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", currentPrice: 0.00001053, baseline: 0.00001040, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "PLSX_INVERTED" },
+    { name: "HEX/WPLS",  contract: "0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65", currentPrice: 0.00358500, baseline: 0.00355000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "HEX_INVERTED" },
     { name: "DAI/WPLS",  contract: "0xefd766ccb38eaf1dfd701853bfce31359239f305", currentPrice: 1.00000000, baseline: 0.99800000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "FIXED_STABLE" },
     { name: "INC/WPLS",  contract: "0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa", currentPrice: 0.55160000, baseline: 0.55000000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "RATIO_1_0" }
 ];
@@ -50,12 +50,10 @@ function processMultiAssetEngine(p, nextPrice) {
 }
 
 async function renderHtmlLayout() {
-    // 1. Core Reference Pass: Resolve precise WPLS base price using stablecoin decimals
     let wplsUsdPrice = 0.00001214;
     const wplsReserves = await queryOnChainReserves("0xe56043671df55de5cdf8459710433c10324de0ae", 18, 6);
     if (wplsReserves && wplsReserves.r0 > 0) { wplsUsdPrice = wplsReserves.r1 / wplsReserves.r0; }
 
-    // 2. Main Processing Pipeline: Convert ratios directly into clean US dollar valuations
     for (let i = 0; i < assetPools.length; i++) {
         const pool = assetPools[i];
         if (pool.mode === "WPLS_USDC") { pool.currentPrice = wplsUsdPrice; processMultiAssetEngine(pool, wplsUsdPrice); continue; }
@@ -64,7 +62,10 @@ async function renderHtmlLayout() {
         const reserves = await queryOnChainReserves(pool.contract, pool.dec0, pool.dec1);
         if (reserves && reserves.r0 > 0 && reserves.r1 > 0) {
             let finalizedPrice = 0;
-            if (pool.mode === "RATIO_0_1") {
+            if (pool.mode === "PLSX_INVERTED") {
+                // Corrects the PLSX/WPLS ratio by multiplying the flipped contract reserves directly against the USD anchor
+                finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
+            } else if (pool.mode === "HEX_INVERTED") {
                 finalizedPrice = (reserves.r0 / reserves.r1) * wplsUsdPrice;
             } else if (pool.mode === "RATIO_1_0") {
                 finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
@@ -81,4 +82,4 @@ async function renderHtmlLayout() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="10"><title>Portfolio</title><style>body{font-family:sans-serif;background:#0f0f11;color:#e2e8f0;padding:30px;}.container{max-width:850px;margin:0 auto;}.card{background:#16161a;border:1px solid #24242b;padding:25px;border-radius:12px;margin-bottom:20px;}.lbl{font-size:13px;color:#94a3b8;text-transform:uppercase;}.val{font-size:28px;font-weight:bold;font-family:monospace;}.green-txt{color:#10b981;}table{width:100%;border-collapse:collapse;margin-top:15px;}th{text-align:left;padding:12px;background:#1e1e24;color:#94a3b8;font-size:12px;}td{padding:12px;border-bottom:1px solid #24242b;font-size:13px;}</style></head><body><div class="container"><div class="card" style="border-left:5px solid #10b981;"><div class="lbl">BOT GLOBAL STATE</div><div class="val" style="color:#10b981;">[ON-CHAIN] MULTI-ASSET RISK BALANCER LIVE (AUTO-REFRESHING)</div></div><div class="card"><div class="lbl">CONSOLIDATED LIQUIDITY BALANCES</div><div style="display:flex;justify-content:space-between;margin-top:15px;"><div><div class="lbl">USDC BALANCE</div><div class="val">$${totalUsdcWallet.toFixed(2)}</div></div><div><div class="lbl">RESERVE WPLS</div><div class="val">${totalWplsWallet.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div><div class="card"><div class="lbl">REAL-TIME PORTFOLIO NET WORTH</div><div class="val green-txt">$${totalEquity.toFixed(2)} USD</div></div><div class="card"><div class="lbl">[MONITOR] LIVE ON-CHAIN PRICE MATRIX (FIAT USD VALUATIONS)</div><table><thead><tr><th>Trading Pair Pool</th><th>Status</th><th>On-Chain Market Rate</th><th>Baseline Anchor</th><th>Allocation Space</th></tr></thead><tbody>${pRows}</tbody></table></div><div class="card"><div class="lbl">[LOGS] LIVE BLOCK EXECUTION RECORD LAYER</div><table><thead><tr><th>Action</th><th>Target Asset Pair</th><th>Price Value</th><th>Network Validation</th></tr></thead><tbody>${lRows}</tbody></table></div></div></body></html>`;
 }
 
-http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 Core Conversion Engine Active"); });
+http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 Absolute Precision Core Engaged"); });
