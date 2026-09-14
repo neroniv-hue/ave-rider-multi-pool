@@ -1,5 +1,5 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (PRECISION DECIMAL INTEGRATION)
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (EXACT ON-CHAIN COIN CONVERSIONS)
  */
 "use strict";
 const http = require('http'), https = require('https');
@@ -51,7 +51,6 @@ function processMultiAssetEngine(p, nextPrice) {
 }
 
 async function renderHtmlLayout() {
-    // 1. Establish strict global dollar anchor value from WPLS pool accounting for decimals
     let wplsUsdPrice = 0.00001218;
     const wplsReserves = await queryOnChainReserves("0xe56043671df55de5cdf8459710433c10324de0ae", 18, 6);
     if (wplsReserves && wplsReserves.r0 > 0) { 
@@ -66,11 +65,15 @@ async function renderHtmlLayout() {
         const reserves = await queryOnChainReserves(pool.contract, pool.dec0, pool.dec1);
         if (reserves && reserves.r0 > 0 && reserves.r1 > 0) {
             let finalizedPrice = 0;
-            if (pool.mode === "DIV_0_BY_1") {
-                // Correctly handles HEX/WPLS and PLSX/WPLS cross-rates
+            if (pool.name === "PLSX/WPLS") {
+                // Corrects the inverted PLSX token multiplier
+                finalizedPrice = (reserves.r0 / reserves.r1) * wplsUsdPrice;
+            } else if (pool.name === "INC/WPLS") {
+                // Multiplies the raw ratio correctly to calculate live INC token value (~$4.50 - $6.00)
+                finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
+            } else if (pool.mode === "DIV_0_BY_1") {
                 finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
             } else if (pool.mode === "DIV_1_BY_0") {
-                // Correctly handles token-dominant pricing matrices like INC/WPLS
                 finalizedPrice = (reserves.r0 / reserves.r1) * wplsUsdPrice;
             }
             pool.currentPrice = finalizedPrice; processMultiAssetEngine(pool, finalizedPrice);
