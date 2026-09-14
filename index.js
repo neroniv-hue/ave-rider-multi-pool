@@ -1,24 +1,29 @@
 /**
- * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (EXACT ON-CHAIN COIN CONVERSIONS)
+ * 🌊 WAVE RIDER MULTI-ASSET PORTFOLIO RISK ENGINE (PRECISION DECIMAL INTEGRATION)
  */
 "use strict";
 const http = require('http'), https = require('https');
 
+// Master capital allocations setup ($1500.00 USDC / 125M WPLS)
 let totalUsdcWallet = 1500.00, totalWplsWallet = 125000000.0, globalLedgerLogs = [];
 const assetPools = [
-    { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 0.00001218, baseline: 0.00001210, rollingWindow: [], position: null, direction: "DIRECT" },
-    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", currentPrice: 0.00000041, baseline: 0.00000040, rollingWindow: [], position: null, direction: "BASE_DIV_QUOTE" },
-    { name: "HEX/WPLS",  contract: "0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65", currentPrice: 0.00359000, baseline: 0.00355000, rollingWindow: [], position: null, direction: "QUOTE_DIV_BASE" },
-    { name: "DAI/WPLS",  contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 1.00000000, baseline: 0.99800000, rollingWindow: [], position: null, direction: "STABLE_BASE" },
-    { name: "INC/WPLS",  contract: "0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa", currentPrice: 0.58400000, baseline: 0.58000000, rollingWindow: [], position: null, direction: "QUOTE_DIV_BASE" }
+    { name: "WPLS/USDC", contract: "0xe56043671df55de5cdf8459710433c10324de0ae", currentPrice: 0.00001218, baseline: 0.00001210, rollingWindow: [], position: null, dec0: 18, dec1: 6, mode: "WPLS_USDC" },
+    { name: "PLSX/WPLS", contract: "0x149b2c2d2cb2fbf23bb1d0b30bb224ba46066f9f", currentPrice: 0.00000041, baseline: 0.00000040, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "DIV_0_BY_1" },
+    { name: "HEX/WPLS",  contract: "0xf1f4ee610b2babb05c635f726ef8b0c568c8dc65", currentPrice: 0.00359000, baseline: 0.00355000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "DIV_0_BY_1" },
+    { name: "DAI/WPLS",  contract: "0xefd766ccb38eaf1dfd701853bfce31359239f305", currentPrice: 1.00000000, baseline: 0.99800000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "STABLE_FIXED" },
+    { name: "INC/WPLS",  contract: "0xf808bb6265e9ca27002c0a04562bf50d4fe37eaa", currentPrice: 0.58400000, baseline: 0.58000000, rollingWindow: [], position: null, dec0: 18, dec1: 18, mode: "DIV_1_BY_0" }
 ];
 
-function queryOnChainReserves(contractAddress) {
+function queryOnChainReserves(contractAddress, d0, d1) {
     return new Promise((resolve) => {
         const payload = JSON.stringify({ jsonrpc: "2.0", method: "eth_call", params: [{ to: contractAddress, data: "0x0902f1ac" }, "latest"], id: 1 });
-        const req = https.request({ hostname: 'rpc.pulsechain.com', port: 443, path: '/', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length } }, (res) => {
+        const req = https.request({ hostname: '://pulsechain.com', port: 443, path: '/', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length } }, (res) => {
             let buf = ''; res.on('data', (d) => buf += d);
-            res.on('end', () => { try { const parsed = JSON.parse(buf); if (parsed.result && parsed.result !== "0x") { resolve({ r0: Number(BigInt("0x" + parsed.result.slice(2, 66))) / 1e18, r1: Number(BigInt("0x" + parsed.result.slice(66, 130))) / 1e18 }); } else { resolve(null); } } catch (e) { resolve(null); } });
+            res.on('end', () => { try { const parsed = JSON.parse(buf); if (parsed.result && parsed.result !== "0x") { 
+                const rawR0 = BigInt("0x" + parsed.result.slice(2, 66));
+                const rawR1 = BigInt("0x" + parsed.result.slice(66, 130));
+                resolve({ r0: Number(rawR0) / Math.pow(10, d0), r1: Number(rawR1) / Math.pow(10, d1) });
+            } else { resolve(null); } } catch (e) { resolve(null); } });
         });
         req.on('error', () => resolve(null)); req.write(payload); req.end();
     });
@@ -46,21 +51,26 @@ function processMultiAssetEngine(p, nextPrice) {
 }
 
 async function renderHtmlLayout() {
+    // 1. Establish strict global dollar anchor value from WPLS pool accounting for decimals
     let wplsUsdPrice = 0.00001218;
-    const wplsReserves = await queryOnChainReserves("0xe56043671df55de5cdf8459710433c10324de0ae");
-    if (wplsReserves && wplsReserves.r0 > 0) { wplsUsdPrice = (wplsReserves.r1 / wplsReserves.r0) * 1e12; }
+    const wplsReserves = await queryOnChainReserves("0xe56043671df55de5cdf8459710433c10324de0ae", 18, 6);
+    if (wplsReserves && wplsReserves.r0 > 0) { 
+        wplsUsdPrice = wplsReserves.r1 / wplsReserves.r0; 
+    }
 
     for (let i = 0; i < assetPools.length; i++) {
         const pool = assetPools[i];
-        if (pool.direction === "DIRECT") { pool.currentPrice = wplsUsdPrice; processMultiAssetEngine(pool, wplsUsdPrice); continue; }
-        if (pool.direction === "STABLE_BASE") { pool.currentPrice = 1.0000; processMultiAssetEngine(pool, 1.0000); continue; }
+        if (pool.mode === "WPLS_USDC") { pool.currentPrice = wplsUsdPrice; processMultiAssetEngine(pool, wplsUsdPrice); continue; }
+        if (pool.mode === "STABLE_FIXED") { pool.currentPrice = 1.0000; processMultiAssetEngine(pool, 1.0000); continue; }
         
-        const reserves = await queryOnChainReserves(pool.contract);
+        const reserves = await queryOnChainReserves(pool.contract, pool.dec0, pool.dec1);
         if (reserves && reserves.r0 > 0 && reserves.r1 > 0) {
             let finalizedPrice = 0;
-            if (pool.direction === "QUOTE_DIV_BASE") {
+            if (pool.mode === "DIV_0_BY_1") {
+                // Correctly handles HEX/WPLS and PLSX/WPLS cross-rates
                 finalizedPrice = (reserves.r1 / reserves.r0) * wplsUsdPrice;
-            } else if (pool.direction === "BASE_DIV_QUOTE") {
+            } else if (pool.mode === "DIV_1_BY_0") {
+                // Correctly handles token-dominant pricing matrices like INC/WPLS
                 finalizedPrice = (reserves.r0 / reserves.r1) * wplsUsdPrice;
             }
             pool.currentPrice = finalizedPrice; processMultiAssetEngine(pool, finalizedPrice);
@@ -74,4 +84,4 @@ async function renderHtmlLayout() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Portfolio</title><style>body{font-family:sans-serif;background:#0f0f11;color:#e2e8f0;padding:30px;}.container{max-width:850px;margin:0 auto;}.card{background:#16161a;border:1px solid #24242b;padding:25px;border-radius:12px;margin-bottom:20px;}.lbl{font-size:13px;color:#94a3b8;text-transform:uppercase;}.val{font-size:28px;font-weight:bold;font-family:monospace;}.green-txt{color:#10b981;}table{width:100%;border-collapse:collapse;margin-top:15px;}th{text-align:left;padding:12px;background:#1e1e24;color:#94a3b8;font-size:12px;}td{padding:12px;border-bottom:1px solid #24242b;font-size:13px;}</style></head><body><div class="container"><div class="card" style="border-left:5px solid #10b981;"><div class="lbl">BOT GLOBAL STATE</div><div class="val" style="color:#10b981;">[ON-CHAIN] MULTI-ASSET RISK BALANCER LIVE</div></div><div class="card"><div class="lbl">CONSOLIDATED LIQUIDITY BALANCES</div><div style="display:flex;justify-content:space-between;margin-top:15px;"><div><div class="lbl">USDC BALANCE</div><div class="val">$${totalUsdcWallet.toFixed(2)}</div></div><div><div class="lbl">RESERVE WPLS</div><div class="val">${totalWplsWallet.toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div><div class="card"><div class="lbl">REAL-TIME PORTFOLIO NET WORTH</div><div class="val green-txt">$${totalEquity.toFixed(2)} USD</div></div><div class="card"><div class="lbl">[MONITOR] LIVE ON-CHAIN PRICE MATRIX (FIAT USD VALUATIONS)</div><table><thead><tr><th>Trading Pair Pool</th><th>Status</th><th>On-Chain Market Rate</th><th>Baseline Anchor</th><th>Allocation Space</th></tr></thead><tbody>${pRows}</tbody></table></div><div class="card"><div class="lbl">[LOGS] LIVE BLOCK EXECUTION RECORD LAYER</div><table><thead><tr><th>Action</th><th>Target Asset Pair</th><th>Rate Token Value</th><th>Network Validation</th></tr></thead><tbody>${lRows}</tbody></table></div></div></body></html>`;
 }
 
-http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 Pricing Engine Active"); });
+http.createServer(async (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(await renderHtmlLayout()); }).listen(process.env.PORT || 10000, () => { console.log("📡 Precision Pricing Core Engaged"); });
